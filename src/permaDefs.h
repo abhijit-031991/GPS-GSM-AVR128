@@ -6,7 +6,7 @@
 
 // Device ID //
 
-const uint16_t tag = 10104;
+const uint16_t tag = 10101;
 const uint8_t devType = 107;
 
 // Firmware Version //
@@ -28,10 +28,10 @@ const float firmwareVersion = 2.0;
 
 // Server Variables // 
 
-const char statReq[] = "{\"id\":\"10104\", \"req\":1}";
-const char setReq[] = "{\"id\":\"10104\", \"req\":2}";
-const char setRep[] = "{\"id\":\"10104\", \"req\":3}";
-const char stAlrt[] = "{\"id\":\"10104\", \"req\":4}";
+const char statReq[] = "{\"id\":\"10101\", \"req\":1}";
+const char setReq[] = "{\"id\":\"10101\", \"req\":2}";
+const char setRep[] = "{\"id\":\"10101\", \"req\":3}";
+const char stAlrt[] = "{\"id\":\"10101\", \"req\":4}";
 
 const char* broker = "65.1.242.158";
 
@@ -51,7 +51,7 @@ struct data{
     uint16_t locktime;
     float lat;
     float lng;
-    byte hdop;
+    float hdop;
     bool act;
   };
 

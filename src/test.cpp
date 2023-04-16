@@ -42,12 +42,13 @@ uint32_t lastReconnectAttempt = 0;
 int mainMode = 0;                   // switch Mode variable(0 = main, 1 = live tracking)
 
 // GPS Control Variables //
-int gpsTimeout = 50;                // GPS Timeout in seconds  *** USER CONFIG ***
-int gpsFrequency = 15;               // GPS Frequency in Minutes *** USER CONFIG ***
+unsigned int gpsTimeout = 120;      // GPS Timeout in seconds  *** USER CONFIG ***
+int gpsFrequency = 15;              // GPS Frequency in Minutes *** USER CONFIG ***
 int gpsHdop = 5;                    // GPS HDOP *** USER CONFIG ***
+int sleepCounter = 0;               // Sleep Counter for live traccking mode
 
 // GSM Control Variables //
-int transmissionFrequency = 60;     // Transmission Frequency in MINS
+int transmissionFrequency = 360;     // Transmission Frequency in MINS
 
 // GPS Storage Variables // 
 double lat;
@@ -79,10 +80,38 @@ bool activity_enabled = false;      //** Activity Enabled Flag -
 bool rtc_int_triggered = false;
 bool act_int_triggered = false;
 bool wipe_memory = false;           //** Memory Wipe flag -
+bool noSleepLt = false;
+
+// Control Variables //
+uint16_t pingSecondCounter;
+uint16_t gpsSecondCounter;
+uint16_t pingCounterTarget;
+uint16_t gpsCounterTarget;
 
 //************************************************//
 //***************    FUNCTIONS    ****************//
 //************************************************//
+void RTC_init(void)
+{
+  /* Initialize RTC: */
+  while (RTC.STATUS > 0)
+  {
+    ;                                   /* Wait for all register to be synchronized */
+  }
+  RTC.CLKSEL = RTC_CLKSEL_INT32K_gc;    /* 32.768kHz Internal Ultra-Low-Power Oscillator (OSCULP32K) */
+
+  RTC.PITINTCTRL = RTC_PI_bm;           /* PIT Interrupt: enabled */
+
+  RTC.PITCTRLA = RTC_PERIOD_CYC32768_gc /* RTC Clock Cycles 16384, resulting in 32.768kHz/16384 = 2Hz */
+  | RTC_PITEN_bm;                       /* Enable PIT counter: enabled */
+}
+
+ISR(RTC_PIT_vect)
+{
+  RTC.PITINTFLAGS = RTC_PI_bm;          /* Clear interrupt flag by writing '1' (required) */
+  pingSecondCounter = pingSecondCounter + 1;
+  gpsSecondCounter = gpsSecondCounter + 1;
+}
 
 boolean mqttConnect() {
   SerialMon.print("Connecting to ");
@@ -147,7 +176,12 @@ void mqttCallback(char* topic, byte* payload, unsigned int len) {
     }else{
       wipe_memory = false;
     }
-    
+    if (doc["ltr"] == true)
+    {
+      mainMode = 1;
+    }else{
+      mainMode = 0;
+    }    
   }
 
   if (top == "settings")
@@ -346,10 +380,10 @@ void acqGPS(){
 }
 
 void recGPS(){
-  mTime = 0;
+  Btime = 0;
   digitalWrite(GPS_PIN, HIGH);
   Serial.println(gpsTimeout*1000);
-  while (mTime <= gpsTimeout*1000)
+  while (Btime <= (gpsTimeout*1000))
   {
     while (Serial1.available())
     {
@@ -378,8 +412,9 @@ void recGPS(){
       break;
     }  
   }   
-
+  
   digitalWrite(GPS_PIN, LOW);
+  
   data dat;
 
   if (gps.location.age() < 60000)
@@ -394,6 +429,7 @@ void recGPS(){
     dat.lat = 0;
     dat.lng = 0;
   }
+    Serial.print(gps.date.day());Serial.print(gps.date.month());Serial.println(gps.date.year());
     setTime(gps.time.hour(), gps.time.minute(), gps.time.second(), gps.date.day(), gps.date.month(), gps.date.year());
     dat.datetime = (uint32_t)now();
     dat.locktime = mTime/1000;
@@ -455,7 +491,7 @@ void read_send(){
       doc[F("hdop")] = dat.hdop;
       doc[F("LT")] = dat.locktime; 
       doc[F("Count")] = cnt;
-      doc[F("id")] = (String)tag;
+      doc[F("id")] = tag;
 
       
     }else
@@ -545,10 +581,11 @@ void setup() {
   Wire.usePullups();
   Wire.begin();
   SPI.begin();
+  RTC_init();
 
   Serial.print(F("Tag ID :")); Serial.println(tag);Serial.println();
   Serial.println(F("Initializing..."));
-
+  
   //***************************************************//
   digitalWrite(GSM_PIN, HIGH);
   delay(5000);
@@ -570,7 +607,6 @@ void setup() {
     SerialMon.print(broker);
 
     // Connect to MQTT Broker
-    // boolean status = mqtt.connect("GsmClientTest");
 
     // Or, if you want to authenticate MQTT:
     boolean status = mqtt.connect((char*)&tag);
@@ -636,10 +672,10 @@ void setup() {
 //***************************************************//
 
   if(!acce.begin()){
-  Serial.println("Communication failed, check the connection and I2C address setting when using I2C communication.");
+  Serial.println(F("Acc Error"));
   delay(1000);
   }else{
-  Serial.print("chip id : ");
+  Serial.print(F("chip id : "));
   Serial.println(acce.getID(),HEX);
   }
   acce.softReset();
@@ -699,7 +735,7 @@ void setup() {
   if (activate == true)
   {
     acqGPS();
-    // strtTime = 1672052568;
+    // strtTime = 1672052568; 
     Serial.println(strtTime);
     next_gps_wakeup = strtTime + (gpsFrequency*60);
     
@@ -717,9 +753,13 @@ void setup() {
     digitalWrite(RTC_PIN, LOW);
 
     attachInterrupt(digitalPinToInterrupt(RINT), risr, CHANGE);
-  }  
+  }
+
+  gpsCounterTarget = gpsFrequency*60;
+  pingCounterTarget = transmissionFrequency*60;  
 
 //***************************************************//
+  
   Serial.println("SYSTEM READY");
   Serial.flush();
 //***************************************************//
@@ -730,44 +770,155 @@ void setup() {
 
 void loop() {
   // put your main code here, to run repeatedly:
-
-    if (rtc_int_triggered)
+  switch (mainMode)
+  {
+  case 0: // Normal Mode loop
+    Serial.println(F("Mode 1"));
+    mTime = 0;
+    if (gpsSecondCounter >= gpsCounterTarget)
     {
-      digitalWrite(RTC_PIN, HIGH);
-      if(rtc.alarm(0)){
-        Serial.println(F("ALARM 0"));
-        currentTime = rtc.get();
-        next_gps_wakeup = currentTime + gpsFrequency*60;
-        rtc.setAlarm(0, next_gps_wakeup);      
-        rtc.enableAlarm(0, ALM_MATCH_DATETIME);
-        recGPS();
+      recGPS();
+      gpsSecondCounter = 0;
+      if ((mTime/1000) < (gpsFrequency*60))
+      {
+        gpsCounterTarget = (gpsFrequency*60)-(mTime/1000);
+      }else{
+        gpsCounterTarget = gpsFrequency*60;
       }
-      //************************************************************//
-      if(rtc.alarm(1)){
-        Serial.println(F("ALARM 1"));
-        Serial.println(rtc.get());
-        delay(10);
-        currentTime = rtc.get();
-        next_gsm_wakeup = currentTime + transmissionFrequency*60;
-        rtc.setAlarm(1, next_gsm_wakeup); 
-        rtc.enableAlarm(1, ALM_MATCH_DATETIME);
-        digitalWrite(GSM_PIN, HIGH);
-        networkInit();
-        mqttConnect();
-        while (rAdd < wAdd)
-        {
-          read_send();
-          rAdd = rAdd + 16;
-        }
-        postMetaAttributes(); 
-        syncSettings();
-        digitalWrite(GSM_PIN, LOW);
-      }
-      validateAlarms();
-      digitalWrite(RTC_PIN, LOW);
-      rtc_int_triggered = false;
+      
+      
     }
-    attachInterrupt(digitalPinToInterrupt(RINT), risr, CHANGE);
+    if (pingSecondCounter >= pingCounterTarget)
+    {
+      Serial.println(F("Ping"));
+      digitalWrite(GSM_PIN, HIGH);
+      networkInit();
+      if (!mqtt.connected())
+      {
+        mqttConnect();
+      }      
+      postMetaAttributes(); 
+      while (rAdd < wAdd)
+      {
+        read_send();
+        rAdd = rAdd + 19;
+      }
+      syncSettings();
+      digitalWrite(GSM_PIN, LOW);    
+      
+      pingSecondCounter = 0;
+      if ((mTime/1000) < (transmissionFrequency*60))
+      {
+        pingCounterTarget = (transmissionFrequency*60)-(mTime/1000);
+      }else{
+        pingCounterTarget = transmissionFrequency*60;
+      }
+    }
+    Serial.print(gpsSecondCounter); Serial.println(pingSecondCounter);
     Serial.flush();
-    sleep_cpu();    
+    sleep_cpu();
+    break;
+
+  case 1: // Live Tracking Mode Loop    
+  RTC.PITINTCTRL = RTC_PI_bm;           /* PIT Interrupt: enabled */
+    if (noSleepLt)
+    {
+      Serial.println(F("Live Mode"));
+      digitalWrite(GPS_PIN, HIGH);
+      digitalWrite(GSM_PIN, HIGH);
+      mTime = 0;
+      while (mTime <= 60000)
+      {
+        while (Serial1.available())
+        {
+          if (!gps.encode(Serial1.read()))
+          {
+            if (!gps.location.isValid())
+            {
+              Serial.println(F("Acquiring"));
+            }else{
+              Serial.println(gps.location.isUpdated());
+              Serial.print(F("Location Age:"));
+            }       
+          }
+          if (gps.hdop.hdop() < (double)gpsHdop && gps.location.age() < 1000 && gps.time.age() < 1000 && mTime > 3000)
+          {
+            lat = gps.location.lat();
+            lng = gps.location.lng();
+            setTime(gps.time.hour(), gps.time.minute(), gps.time.second(), gps.date.day(), gps.date.month(), gps.date.year());
+            break;
+          }      
+        }
+      }    
+      
+      digitalWrite(GPS_PIN, LOW);
+      SerialAT.println(F("AT"));
+      Btime = 0;
+      while (Btime < 2000)
+      {
+        if (SerialAT.available())
+        {
+          SerialMon.println(SerialAT.readString());
+        }    
+      }
+      if (!modem.isNetworkConnected())
+      {
+        networkInit();
+      }else{
+        if (!modem.isGprsConnected()) {
+          SerialMon.println(F("GPRS not connected!"));
+          SerialMon.print(F("Connecting to "));
+          SerialMon.println(apn);
+          if (!modem.gprsConnect(apn, gprsUser, gprsPass)) {
+            SerialMon.println(F(" fail"));
+            delay(10000);
+            return;
+          }
+        }
+        if (!mqtt.connected())
+        {
+          mqttConnect();
+        }
+        char a[100];
+        StaticJsonDocument<100> doc;
+        doc[F("ts")] = (unsigned long long)now();
+        doc[F("Lat")] = lat;
+        doc[F("Lng")] = lng;
+        doc[F("id")] = (String)tag;
+        serializeJson(doc, a);
+        if(mqtt.publish(telemetryTopic, (char*)a)){
+          Serial.println(F("MQTT SUCCESS"));
+        }
+        mqtt.loop();
+      }
+      mqtt.disconnect();
+      modem.gprsDisconnect();
+      SerialAT.println(F("AT+CSCLK=2"));
+      Btime = 0;
+      while (Btime < 2000)
+      {
+        if (SerialAT.available())
+        {
+          SerialMon.println(SerialAT.readString());
+        }    
+      }
+      noSleepLt = false;
+
+    }else{
+      if (sleepCounter < 60)
+      {
+        sleepCounter = sleepCounter + 1;
+        Serial.println(sleepCounter);
+        Serial.flush();
+        sleep_cpu();
+      }else{
+        noSleepLt = true;
+        sleepCounter = 0;
+      }       
+    }          
+    break;
+    
+  default:
+    break;
+  }    
 }
