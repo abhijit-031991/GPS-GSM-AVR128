@@ -6,11 +6,12 @@
 
 // Device ID //
 
-const uint16_t tag = 10101;
+const uint16_t tag = 10301;
+const char id[] = "10301";
 const uint8_t devType = 107;
 
 // Firmware Version //
-const float firmwareVersion = 2.0;
+const float firmwareVersion = 2.0; 
 
 //// Pin Definitions ////
 
@@ -18,7 +19,7 @@ const float firmwareVersion = 2.0;
 #define GSM_PIN PIN_PA2
 #define RTC_PIN PIN_PD7
 #define RINT PIN_PD6
-#define AINT1 PIN_PD4
+#define AINT1 PIN_PD4  
 #define AINT2 PIN_PD5
 #define FCS PIN_PA7
 #define NRFCS PIN_PC2
@@ -28,10 +29,10 @@ const float firmwareVersion = 2.0;
 
 // Server Variables // 
 
-const char statReq[] = "{\"id\":\"10101\", \"req\":1}";
-const char setReq[] = "{\"id\":\"10101\", \"req\":2}";
-const char setRep[] = "{\"id\":\"10101\", \"req\":3}";
-const char stAlrt[] = "{\"id\":\"10101\", \"req\":4}";
+const char statReq[] = "{\"id\":\"10301\", \"req\":1}";
+const char setReq[] = "{\"id\":\"10301\", \"req\":2}";
+const char setRep[] = "{\"id\":\"10301\", \"req\":3}";
+const char stAlrt[] = "{\"id\":\"10301\", \"req\":4}";
 
 const char* broker = "65.1.242.158";
 
